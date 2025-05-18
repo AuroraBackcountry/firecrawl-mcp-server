@@ -1446,6 +1446,53 @@ ${result.markdown ? `\nContent:\n${result.markdown}` : ''}`
   }
 });
 
+async function runHttpServer() {
+  const app = express();
+  app.use(express.json());
+
+  app.get('/health', (req: Request, res: Response) => {
+    res.status(200).json({ status: 'ok' });
+  });
+
+  app.post('/context', async (req: Request, res: Response) => {
+    try {
+      const { references = [], vars = {} } = req.body.input || {};
+      const ref = references.find((r: any) => r.content?.urls?.length > 0);
+
+      if (!ref) {
+        return res.status(400).json({ error: 'No valid reference with URL' });
+      }
+
+      const url = ref.content.urls[0];
+      const result = await server.call({
+        name: 'firecrawl_scrape',
+        arguments: {
+          url,
+          formats: ['markdown'],
+        },
+      });
+
+      return res.status(200).json({
+        references: [
+          {
+            name: ref.name || 'firecrawl_result',
+            content: result.content?.[0]?.text || 'No content',
+          },
+        ],
+        vars,
+      });
+    } catch (err) {
+      console.error('Error in /context:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  const port = process.env.PORT || 3000;
+  app.listen(port, () => {
+    console.log(`✅ Firecrawl MCP server running on http://localhost:${port}/context`);
+  });
+}
+
 // Helper function to format results
 function formatResults(data: FirecrawlDocument[]): string {
   return data
@@ -1591,19 +1638,7 @@ async function runSSECloudServer() {
   });
 }
 
-if (process.env.CLOUD_SERVICE === 'true') {
-  runSSECloudServer().catch((error: any) => {
-    console.error('Fatal error running server:', error);
-    process.exit(1);
-  });
-} else if (process.env.SSE_LOCAL === 'true') {
-  runSSELocalServer().catch((error: any) => {
-    console.error('Fatal error running server:', error);
-    process.exit(1);
-  });
-} else {
-  runLocalServer().catch((error: any) => {
-    console.error('Fatal error running server:', error);
-    process.exit(1);
-  });
-}
+runHttpServer().catch((error: any) => {
+  console.error('Fatal error running HTTP server:', error);
+  process.exit(1);
+});
